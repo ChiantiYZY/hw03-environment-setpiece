@@ -1,4 +1,4 @@
-import {vec2, vec3} from 'gl-matrix';
+import {vec2, vec3, vec4} from 'gl-matrix';
 import * as Stats from 'stats-js';
 import * as DAT from 'dat-gui';
 import Square from './geometry/Square';
@@ -12,6 +12,11 @@ import ShaderProgram, {Shader} from './rendering/gl/ShaderProgram';
 const controls = {
   tesselations: 5,
   'Load Scene': loadScene, // A function pointer, essentially
+  impulse_rate: 1.5,
+  sphere_size: 3,
+  orbit_speed: 0.01,
+  wave_size: 0.02,
+
 };
 
 let square: Square;
@@ -48,6 +53,11 @@ function main() {
   // Add controls to the gui
   const gui = new DAT.GUI();
 
+  gui.add(controls, 'impulse_rate', 0.0, 5.0).step(0.5);
+  gui.add(controls, 'sphere_size', 1.0, 5.0).step(1.0);
+  gui.add(controls, 'orbit_speed', 0.01, 0.05).step(0.01);
+  gui.add(controls, 'wave_size', 0.01, 0.05).step(0.01);
+
   // get canvas and webgl context
   const canvas = <HTMLCanvasElement> document.getElementById('canvas');
   const gl = <WebGL2RenderingContext> canvas.getContext('webgl2');
@@ -61,7 +71,7 @@ function main() {
   // Initial call to load scene
   loadScene();
 
-  const camera = new Camera(vec3.fromValues(0, 0, -10), vec3.fromValues(0, 0, 0));
+  const camera = new Camera(vec3.fromValues(0, 0, 25), vec3.fromValues(0, 0, 0));
 
   const renderer = new OpenGLRenderer(canvas);
   renderer.setClearColor(164.0 / 255.0, 233.0 / 255.0, 1.0, 1);
@@ -83,9 +93,10 @@ function main() {
     gl.viewport(0, 0, window.innerWidth, window.innerHeight);
     renderer.clear();
     processKeyPresses();
+    let size : vec4 = vec4.fromValues(controls.sphere_size, controls.orbit_speed, controls.impulse_rate, controls.wave_size);
     renderer.render(camera, flat, [
       square,
-    ], time);
+    ], time, size);
     time++;
     stats.end();
 
