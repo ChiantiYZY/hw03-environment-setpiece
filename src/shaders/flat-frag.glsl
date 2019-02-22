@@ -8,115 +8,272 @@ uniform vec4 u_Size;
 
 in vec4 fs_Pos;
 out vec4 out_Col;
+#define iterations 17
+#define formuparam 0.53
+
+#define volsteps 20
+#define stepsize 0.1
+
+#define zoom   0.800
+#define tile   0.850
+#define speed  0.010 
+
+#define brightness 0.0015
+#define darkmatter 0.300
+#define distfading 0.730
+#define saturation 0.850
+
+vec3 c_seed = vec3(0);
+float PI_2 = 6.2831853;
 
 
-//random noise
-float rand(float n){return fract(sin(n) * 43758.5453123);}
-float noise(float p){
-	float fl = floor(p);
-  float fc = fract(p);
-	return mix(rand(fl), rand(fl + 1.0), fc);
+// 3D Perlin Noise
+/////////////////////////////////////////
+
+
+float rand(vec2 uv) {
+    const highp float a = 12.9898;
+    const highp float b = 78.233;
+    const highp float c = 43758.5453;
+    highp float dt = dot(uv, vec2(a, b));
+    highp float sn = mod(dt, 3.1415);
+    return fract(sin(sn) * c);
 }
 
-//perlin noise
-vec2 fade(vec2 t) {return t*t*t*(t*(t*6.0-15.0)+10.0);}
+float random1( vec3 p , vec3 seed) {
+  return fract(sin(dot(p + seed, vec3(987.654, 123.456, 531.975))) * 85734.3545);
+}
 
-vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x, 289.0);}
+void draw_stars(inout vec4 color, vec2 uv) {
+    float t = sin(u_Time * 0.1 * rand(-uv)) * 0.5 + 0.5;
+    //color += step(0.99, stars) * t;
+    color += smoothstep(0.99, 1.0, rand(uv)) * t;
+}
 
-float perlin_noise(vec2 P){
-  vec4 Pi = floor(P.xyxy) + vec4(0.0, 0.0, 1.0, 1.0);
-  vec4 Pf = fract(P.xyxy) - vec4(0.0, 0.0, 1.0, 1.0);
-  Pi = mod(Pi, 289.0); // To avoid truncation effects in permutation
-  vec4 ix = Pi.xzxz;
-  vec4 iy = Pi.yyww;
-  vec4 fx = Pf.xzxz;
-  vec4 fy = Pf.yyww;
-  vec4 i = permute(permute(ix) + iy);
-  vec4 gx = 2.0 * fract(i * 0.0243902439) - 1.0; // 1/41 = 0.024...
-  vec4 gy = abs(gx) - 0.5;
-  vec4 tx = floor(gx + 0.5);
-  gx = gx - tx;
-  vec2 g00 = vec2(gx.x,gy.x);
-  vec2 g10 = vec2(gx.y,gy.y);
-  vec2 g01 = vec2(gx.z,gy.z);
-  vec2 g11 = vec2(gx.w,gy.w);
-  vec4 norm = 1.79284291400159 - 0.85373472095314 * 
-    vec4(dot(g00, g00), dot(g01, g01), dot(g10, g10), dot(g11, g11));
-  g00 *= norm.x;
-  g01 *= norm.y;
-  g10 *= norm.z;
-  g11 *= norm.w;
-  float n00 = dot(g00, vec2(fx.x, fy.x));
-  float n10 = dot(g10, vec2(fx.y, fy.y));
-  float n01 = dot(g01, vec2(fx.z, fy.z));
-  float n11 = dot(g11, vec2(fx.w, fy.w));
-  vec2 fade_xy = fade(Pf.xy);
-  vec2 n_x = mix(vec2(n00, n01), vec2(n10, n11), fade_xy.x);
-  float n_xy = mix(n_x.x, n_x.y, fade_xy.y);
-  return 2.3 * n_xy;
+vec3 randGrad(vec3 p, vec3 seed) {
+  switch(int(floor(random1(p, seed) * 6.))) {
+    case 0: return vec3(1., 0., 0.);
+    case 1: return vec3(-1., 0., 0.);
+    case 2: return vec3(0., 1., 0.);
+    case 3: return vec3(0., -1., 0.);
+    case 4: return vec3(0., 0., 1.);
+    default: return vec3(0., 0., -1.);
+  }
 }
 
 
-//Worley
-vec3 random3( vec3 p ) {
-    return fract(sin(vec3(dot(p,vec3(127.1, 311.7, 191.999)),
-                          dot(p,vec3(269.5, 183.3, 765.54)),
-                          dot(p, vec3(420.69, 631.2,109.21))))
-                 *43758.5453);
+float falloff(float t) {
+  t = t * t * t * (t * (t * 6. - 15.) + 10.);
+  return t;
 }
 
-float WorleyNoise3D(vec3 p)
-{
-    // Tile the space
-    vec3 pointInt = floor(p);
-    vec3 pointFract = fract(p);
+float PerlinNoise(vec3 p, float s) {
+    p /= s;
+    vec3 pCell = floor(p);
+    p -= pCell;
+    float dotGrad000 = dot(randGrad(pCell + vec3(0., 0., 0.), c_seed), p - vec3(0., 0., 0.));
+    float dotGrad010 = dot(randGrad(pCell + vec3(0., 1., 0.), c_seed), p - vec3(0., 1., 0.));
+    float dotGrad100 = dot(randGrad(pCell + vec3(1., 0., 0.), c_seed), p - vec3(1., 0., 0.));
+    float dotGrad110 = dot(randGrad(pCell + vec3(1., 1., 0.), c_seed), p - vec3(1., 1., 0.));
+    float dotGrad001 = dot(randGrad(pCell + vec3(0., 0., 1.), c_seed), p - vec3(0., 0., 1.));
+    float dotGrad011 = dot(randGrad(pCell + vec3(0., 1., 1.), c_seed), p - vec3(0., 1., 1.));
+    float dotGrad101 = dot(randGrad(pCell + vec3(1., 0., 1.), c_seed), p - vec3(1., 0., 1.));
+    float dotGrad111 = dot(randGrad(pCell + vec3(1., 1., 1.), c_seed), p - vec3(1., 1., 1.));
 
-    float minDist = 1.0; // Minimum distance initialized to max.
+    float mixedDGX00 = mix(dotGrad000, dotGrad100, falloff(p.x));
+    float mixedDGX10 = mix(dotGrad010, dotGrad110, falloff(p.x));
+    float mixedDGX01 = mix(dotGrad001, dotGrad101, falloff(p.x));
+    float mixedDGX11 = mix(dotGrad011, dotGrad111, falloff(p.x));
 
-    // Search all neighboring cells and this cell for their point
-    for(int z = -1; z <= 1; z++)
-    {
-        for(int y = -1; y <= 1; y++)
-        {
-            for(int x = -1; x <= 1; x++)
-            {
-                vec3 neighbor = vec3(float(x), float(y), float(z));
+    float mixedDGY0 = mix(mixedDGX00, mixedDGX10, falloff(p.y));
+    float mixedDGY1 = mix(mixedDGX01, mixedDGX11, falloff(p.y));
 
-                // Random point inside current neighboring cell
-                vec3 point = random3(pointInt + neighbor);
+    return mix(mixedDGY0, mixedDGY1, falloff(p.z)) * .5 + .5;
+}
 
-                // Animate the point
-                //point = 0.5 + 0.5 * sin(u_Time * 0.01 + 6.2831 * point); // 0 to 1 range
 
-                // Compute the distance b/t the point and the fragment
-                // Store the min dist thus far
-                vec3 diff = neighbor + point - pointFract;
-                float dist = length(diff);
-                minDist = min(minDist, dist);
-            }
-        }
+float FBMPerlin(vec3 p) {
+    float sum = 0.;
+    float noise = 0.;
+    int maxIter = 4;
+    float minCell = 2.;
+    for (int i = 0; i < maxIter; i++) {
+        noise += PerlinNoise(p, minCell * pow(2., float(i))) / pow(2., float(maxIter - i));
+        sum += 1. / pow(2., float(maxIter - i));
     }
-    return minDist;
+    noise /= sum;
+    return noise;
 }
 
-float worleyFBM(vec3 uv) {
-    float sum = 0.f;
-    float freq = 4.f;
-    float amp = 0.5;
-    for(int i = 0; i < 5; i++) {
-        sum += WorleyNoise3D(uv * freq) * amp;
-        freq *= 2.f;
-        amp *= 0.5;
-    }
-    return sum;
+float warpFBMPerlin(vec3 p, int time) {
+  vec3 q = vec3(FBMPerlin(p + vec3(0. + 0.5 * float(u_Time),0., 0.)) + 0.003 * float(u_Time),
+                FBMPerlin(p + vec3(3., 5., 2.)),
+                FBMPerlin(p + vec3(2., -1., 1.)));
+  return FBMPerlin(p + 30.0 * q);
 }
 
 
-float impulse (float k, float x)
+//fbm
+const mat2 m = mat2( 0.80,  0.60, -0.60,  0.80 );
+
+float noise( in vec2 x )
 {
-      float h = k * x;
-      return h * exp(1.f - h);
+	return sin(1.5*x.x)*sin(1.5*x.y);
 }
+
+float fbm4( vec2 p )
+{
+    float f = 0.0;
+    f += 0.5000*noise( p ); p = m*p*2.02;
+    f += 0.2500*noise( p ); p = m*p*2.03;
+    f += 0.1250*noise( p ); p = m*p*2.01;
+    f += 0.0625*noise( p );
+    return f/0.9375;
+}
+
+float fbm6( vec2 p )
+{
+    float f = 0.0;
+    f += 0.500000*(0.5+0.5*noise( p )); p = m*p*2.02;
+    f += 0.250000*(0.5+0.5*noise( p )); p = m*p*2.03;
+    f += 0.125000*(0.5+0.5*noise( p )); p = m*p*2.01;
+    f += 0.062500*(0.5+0.5*noise( p )); p = m*p*2.04;
+    f += 0.031250*(0.5+0.5*noise( p )); p = m*p*2.01;
+    f += 0.015625*(0.5+0.5*noise( p ));
+    return f/0.96875;
+}
+
+
+float func( vec2 q, out vec4 ron )
+{
+    float ql = length( q );
+    q.x += 0.05*sin(0.01*u_Time+ql*4.1);
+    q.y += 0.05*sin(0.01*u_Time+ql*4.3);
+    q *= 0.5;
+
+	vec2 o = vec2(0.0);
+    o.x = 0.5 + 0.5*fbm4( vec2(2.0*q          )  );
+    o.y = 0.5 + 0.5*fbm4( vec2(2.0*q+vec2(5.2))  );
+
+	float ol = length( o );
+    o.x += 0.02*sin(0.01*u_Time+ol)/ol;
+    o.y += 0.02*sin(0.01*u_Time+ol)/ol;
+
+    vec2 n;
+    n.x = fbm6( vec2(4.0*o+vec2(9.2))  );
+    n.y = fbm6( vec2(4.0*o+vec2(5.7))  );
+
+    vec2 p = 4.0*q + 4.0*n;
+
+    float f = 0.5 + 0.5*fbm4( p );
+
+    f = mix( f, f*f*f*3.5, f*abs(n.x) );
+
+    float g = 0.5 + 0.5*sin(4.0*p.x)*sin(4.0*p.y);
+    f *= 1.0-0.5*pow( g, 8.0 );
+
+	ron = vec4( o, n );
+	
+    return f;
+}
+
+float func1( vec2 q, out vec4 ron )
+{
+    float ql = length( q );
+    // q.x += 0.05*sin(0.005*u_Time+ql*4.1);
+    // q.y += 0.05*sin(0.005*u_Time+ql*4.3);
+    q *= 0.5;
+
+	vec2 o = vec2(0.0);
+    o.x = 0.5 + 0.5*fbm4( vec2(2.0*q          )  );
+    o.y = 0.5 + 0.5*fbm4( vec2(2.0*q+vec2(5.2))  );
+
+	float ol = length( o );
+    // o.x += 0.02*sin(0.005*u_Time+ol)/ol;
+    // o.y += 0.02*sin(0.005*u_Time+ol)/ol;
+
+    vec2 n;
+    n.x = fbm6( vec2(4.0*o+vec2(9.2))  );
+    n.y = fbm6( vec2(4.0*o+vec2(5.7))  );
+
+    vec2 p = 4.0*q + 4.0*n;
+
+    float f = 0.5 + 0.5*fbm4( p );
+
+    f = mix( f, f*f*f*3.5, f*abs(n.x) );
+
+    float g = 0.5 + 0.5*sin(4.0*p.x)*sin(4.0*p.y);
+    f *= 1.0-0.5*pow( g, 8.0 );
+
+	ron = vec4( o, n );
+	
+    return f;
+}
+
+float func2( vec2 q, out vec4 ron )
+{
+    float ql = length( q );
+    // q.x += 0.05*sin(0.005*u_Time+ql*4.1);
+    // q.y += 0.05*sin(0.005*u_Time+ql*4.3);
+    q *= 0.5;
+
+	vec2 o = vec2(0.0);
+    o.x = 0.5 + 0.5*fbm4( vec2(2.0*q          )  );
+    o.y = 0.5 + 0.5*fbm4( vec2(2.0*q+vec2(5.2))  );
+
+	float ol = length( o );
+    // o.x += 0.02*sin(0.005*u_Time+ol)/ol;
+    // o.y += 0.02*sin(0.005*u_Time+ol)/ol;
+
+    vec2 n;
+    n.x = fbm4( vec2(4.0*o+vec2(9.2))  );
+    n.y = fbm4( vec2(4.0*o+vec2(5.7))  );
+
+    vec2 p = 4.0*q + 4.0*n;
+
+    float f = 0.5 + 0.5*fbm4( p );
+
+    f = mix( f, f*f*f*3.5, f*abs(n.x) );
+
+    float g = 0.5 + 0.5*sin(4.0*p.x)*sin(4.0*p.y);
+    f *= 1.0-0.5*pow( g, 8.0 );
+
+	ron = vec4( o, n );
+	
+    return f;
+}
+
+
+vec3 doMagic(vec2 p)
+{
+	vec2 q = p*0.6;
+
+    vec4 on = vec4(0.0);
+    float f = func(q, on);
+
+	vec3 col = vec3(0.0);
+    col = mix( vec3(0.0196, 0.5804, 0.1608), vec3(0.0235, 0.2588, 0.4784), f );
+    col = mix( col, vec3(0.1922, 0.0039, 0.1098), dot(on.zw,on.zw) );
+    col = mix( col, vec3(0.502, 0.0118, 0.2157), 0.5*on.y*on.y );
+    col = mix( col, vec3(0.0,0.2,0.4), 0.5*smoothstep(1.2,1.3,abs(on.z)+abs(on.w)) );
+    col = clamp( col*f*2.0, 0.0, 1.0 );
+	return 1.1*col*col;
+}
+
+vec3 doMagic1(vec2 p)
+{
+	vec2 q = p*0.6;
+
+    vec4 on = vec4(0.0);
+    float f = func2(q, on);
+
+	vec3 col = vec3(1.0, 1.0, 1.0);
+    col = mix( vec3(0.349, 0.7412, 0.9686), vec3(1.0, 1.0, 1.0), f );
+    col = mix( col, vec3(0.4, 0.8627, 0.9451), 0.5*smoothstep(1.2,1.3,abs(on.z)) );
+   //col = clamp( col*f*2.0, 0.0, 1.0 );
+	return 1.5*col;
+}
+
 mat4 rotateZ(float theta) {
     float c = cos(theta);
     float s = sin(theta);
@@ -150,16 +307,7 @@ mat4 rotateX(float theta) {
         vec4(0, 0, 0, 1)
     );
 }
-float trianlgeWave(float x, float freq, float amplitude)
-{
-    //x = m - abs(i % (2*m) - m)
 
-    //return x - abs(float(int(freq) % int(2.f * x)) - x);
-
-    //y = abs((x++ % 6) - 3);
-    //return float(abs((float((int(x)+1) % 6)) - 3.f));
-    return float(abs(int(x * freq) % int(amplitude) - int((0.5 * amplitude))));
-}
 float dot2( in vec2 v ) { return dot(v,v); }
 
 
@@ -202,12 +350,12 @@ vec3 opTwist( vec3 p )
 }
 vec3 opCheapBend( vec3 p )
 {
-    float step = smoothstep(-u_Size.w, u_Size.w, cos(u_Time * 0.05 + 3.f * p.x) * 0.01);
+    float step = smoothstep(-u_Size.w * 0.05, u_Size.w * 0.05, 0.01 * sin(u_Time * 0.01));
     float c = sin(step);
     float s = sin(step);
     mat2  m = mat2(c,-s,s,c);
-    vec2 r = m * p.xy;
-    vec3  q = vec3(r.xy, p.z);
+    vec2 r = m * p.yz;
+    vec3  q = vec3(p.x, r.x, r.y);
     return q;
 }
 
@@ -217,7 +365,19 @@ float onion( in float d, in float h )
 }
 
 
+float sphSoftShadow( in vec3 ro, in vec3 rd, in vec4 sph, in float k )
+{
+    vec3 oc = ro - sph.xyz;
+    float b = dot( oc, rd );
+    float c = dot( oc, oc ) - sph.w*sph.w;
+    float h = b*b - c;
+    
 
+    // physically plausible shadow
+    float d = sqrt( max(0.0,sph.w*sph.w-h)) - sph.w;
+    float t = -b - sqrt( max(h,0.0) );
+    return (t<0.0) ? 1.0 : smoothstep(0.0, 1.0, 2.5*k*d/t ); 
+}    
 float sphere(vec3 p, float r)
 {
     return length(p) - r;
@@ -278,7 +438,7 @@ float sdRoundCone( vec3 p, float r1, float r2, float h )
     
     float b = (r1-r2)/h;
     float a = sqrt(1.0-b*b);
-    float k = dot(q,vec2(-b,a));
+    float k = abs(dot(q,vec2(-b,a)));
     
     if( k < 0.0 ) return length(q) - r1;
     if( k > a*h ) return length(q-vec2(0.0,h)) - r2;
@@ -299,6 +459,23 @@ float sdModPolar(inout vec2 p, float repetitions) {
 }
 
 
+
+vec2 flame(vec3 pos)
+{
+    pos -= vec3(0.0, 35.0, 0.0);   
+    pos /= 3.0;    
+    float d = 1e10;
+    float d1 = sdCylinder(pos, vec2(1.6, 10.f));
+    
+    //d1 *= radius;
+
+    d = min(d, d1);
+
+    return vec2(d * 3.f, 0.f);
+}
+
+
+
 //engine
 vec2 obj1(vec3 pos)
 {
@@ -314,12 +491,15 @@ vec2 obj1(vec3 pos)
 
     //top
     float d1 = sphere(pos - vec3(0.f, 1.8, 0.f), 1.7f);
+    //float d_invisible = sphere(pos - vec3(0.f, 1.8, 0.f), 2.0f);
     d1 = d1 - 0.2 * sin(10.f * pos.x)*sin(8.f * pos.y)*sin(6.f * pos.z);
     float d2 = sdCylinder(pos + vec3(0.f, 0.5f, 0.f), vec2(2.f, 2.5f));
     vec3 box_pos = opRep(vec3(atan(pos.x, pos.z), pos.y, 0.5 * length(pos)) , vec3(1.0, 0.0, 1.0));
 
    
     float d3 = sdBox(box_pos, vec3(0.2, 2.0, 0.1));
+
+    //float d3 = sdBox(pos, vec3(0.2, 2.0, 0.1));
 
     d3 = min(d, opSmoothUnion(d3, d2, 0.1));
     d3 = min(d, opSmoothSubtraction(d1, d3, 0.1));
@@ -420,156 +600,49 @@ vec2 obj4(vec3 pos)
 }
 
 
-
-//torus
-vec2 obj6(vec3 pos)
-{
-    pos = pos + vec3(-7.5, -11.f, -2.0);
-
-    pos = pos / 5.f;
-
-    vec3 pos1 = vec3(rotateX(3.14159 / 2.f) * vec4(pos, 1.f));
-    vec3 pos2 = opTwist(pos);
-    float d = 1e10;
-
-
-    //float d1 = sdTorus(pos1, vec2(1.f, 0.1));
-    float d2 = sdTorus(pos2, vec2(0.3f, 0.1));
-
-    //float d_mix = mix(d1, d2, abs(sin(u_Time * 0.01)));
-
-    d = min(d, d2);
-
-    return vec2(d * 5.f, 6.f);
-
-}
-
-//shelf
-vec2 obj8(vec3 pos)
-{
-    float d = 1e10;
-    float d1 = sdBox(pos + vec3(0.f, -5.f, 0.f), vec3(15.f, .1f, 4.f));
-    float d2 = sdBox(pos + vec3(0.f, 10.f, 0.f), vec3(15.f, .1f, 4.f));
-    float d3 = sdBox(pos + vec3(0.f, -20.f, 0.f), vec3(15.f, .1f, 4.f));
-float d4 = sdBox(pos + vec3(0.f, -5.f, 0.f), vec3(.1f, 15.f, 4.f));
-    float d5 = sdBox(pos + vec3(-15.f, -5.f, 0.f), vec3(.1f, 15.f, 4.f));
-    float d6 = sdBox(pos + vec3(15.f, -5.f, 0.f), vec3(.1f, 15.f, 4.f));
-    
-
-
-    d = min(d, d1);
-    d = min(d, d2);
-    d = min(d, d3);
-     d = min(d, opSmoothUnion(d, d4, 0.01));
-    d = min(d, opSmoothUnion(d, d5, 0.01));
-    d = min(d, opSmoothUnion(d, d6, 0.01));
-    
-
-    return vec2(d, 8.f);
-}
-
-vec2 obj7(vec3 pos)
-{
-    float d = 1e10;
-    
-    float d7 = sdBox(pos + vec3(0.f, -5.f, 4.f), vec3(15.f, 15.f, .1f));
-
-   
-    d = min(d, opSmoothUnion(d, d7, 0.01));
-
-    return vec2(d, 7.f);
-}
-
-vec2 mapObj1(vec3 pos)
-{
-    float d = 1e10;
-    float d_1 = sdBox(pos, vec3(15.f, 15.f, 15.f));
-
-    d = min(d, d_1);
-    return vec2(d, 8.f);
-}
-
-vec2 mapObj2(vec3 pos)
-{
-    float d = 1e10;
-    float d1 = sdBox(pos, vec3(3.f));
-
-    d = min(d, d1);
-    return vec2(d, 8.f);
-}
-
-vec2 mapObj3(vec3 pos)
-{
-    float d = 1e10;
-    float d1 = sdBox(pos + vec3(7.5, -12.5f, -2.f), vec3(5.f));
-
-    d = min(d, d1);
-    return vec2(d, 8.f);
-}
-
-vec2 mapObj4(vec3 pos)
-{
-    float d = 1e10;
-    float d1 = sdBox(pos + vec3(-7.5, -12.5f, -2.f), vec3(7.f, 7.f, 5.f));
-
-    d = min(d, d1);
-    return vec2(d, 8.f);
-}
-
-
-
-
-
 vec2 map(vec3 pos)
 {
-
     float d = 1e10;
    
 
     float tag = 1.f;
-
-    // float box_d1 = mapObj1(pos).x;
-    // float box_d2 = mapObj2(pos).x;
-    // float box_d3 = mapObj3(pos).x;
-    // float box_d4 = mapObj4(pos).x;
-
-
-        //float height = perlin_noise((vec2(pos.x + pos.y, pos.z + pos.y) ) / 4.f);
-        //float height_forest = perlin_noise((vec2(fs_Pos.x, fs_Pos.z) ) / 3.f);
-       float worley_Offset = worleyFBM(pos * 0.05);
-   
-    //float offset = noise(pos.y * 10.0);
-
-   float d1 = obj1(pos).x;
+    
+    float d1 = obj1(pos).x;
    float d2 = obj2(pos).x;
    float d3 = obj3(pos).x;
-   float d4 = obj4(pos).x;
-   float d5 = obj5(pos+ vec3(0.0, 15.0 + worley_Offset, 0.0)).x;
 
     d1 = min(d,  opSmoothSubtraction(d2, d1, 0.1));
     d1 = min(d, opSmoothUnion(d1, d3, 0.1));
+
+    //d1 = min(d1, opSmoothUnion(d1, d4, 0.1));
+
     if(d1 < d)
     {
         d = d1;
         tag = obj1(pos).y;
     }
 
-    d4 = min(d, opSmoothUnion(d, d4, 0.1));
-
+    float d4 = flame(pos).x;
+    d4 = opSmoothUnion(d, d4, 0.1);
     if(d4 < d)
     {
         d = d4;
-        tag = obj4(pos).y;
+        tag = 0.f;
     }
 
+    vec2 p = 0.01 * vec2(pos.x + pos.y, pos.y + pos.z);
+    vec4 on = vec4(0.0);
 
+    vec3 height = doMagic1(p);
 
+    float d5 = obj5(pos+ vec3(0.0, 11.0 + length(height) * 2.0, 0.0)).x;
+
+    d5 = opSmoothUnion(d, d5, 0.1);
     if(d5 < d)
     {
         d = d5;
         tag = obj5(pos).y;
     }
-
 
     
   // d = min(d, d2);
@@ -617,115 +690,132 @@ float opDisplace(vec3 p, vec3 eye )
 }
 
 
-
-mat4 viewMatrix(vec3 eye, vec3 center, vec3 up) {
-	vec3 f = normalize(center - eye);
-	vec3 s = normalize(cross(f, up));
-	vec3 u = cross(s, f);
-	return mat4(
-		vec4(s, 0.0),
-		vec4(u, 0.0),
-		vec4(-f, 0.0),
-		vec4(0.0, 0.0, 0.0, 1)
-	);
-}
-
-
-
 void main() {
 
   //vec2 screen = vec2((fs_Pos.x / u_Dimensions.x) * 2.f - 1.f, 1.f - (fs_Pos.y / u_Dimensions.y) * 2.f);
 
+  vec3 look = vec3(u_Eye.x, u_Eye.y, -u_Eye.z * 3.f);
+
 //get ray marching direction 
   vec2 screen = fs_Pos.xy;
-  vec3 right = cross(normalize(u_Ref - u_Eye), normalize(u_Up));
+  vec3 right = cross(normalize(u_Ref - look), normalize(u_Up));
   float alpha = 50.f * 3.14159 / 180.0;
-  float len = length(u_Ref - u_Eye);
+  float len = length(u_Ref - look);
   vec3 V = u_Up * len * tan(alpha);
   vec3 H = right * len * u_Dimensions.x / u_Dimensions.y * tan(alpha);
   vec3 P = u_Ref + screen.x * H + screen.y * V;
-  vec3 dir = normalize(P - u_Eye);
+  vec3 dir = normalize(P - look);
 
 
 //intersection
-  float t = dist(dir, u_Eye).x;
-  float tag = dist(dir, u_Eye).y;
+  float t = dist(dir, look).x;
+  float tag = dist(dir, look).y;
 
   //float t = opDisplace(dir, u_Eye);
-  vec3 isect = u_Eye + t * dir;
+  vec3 isect = look + t * dir;
 
-//phong (called normal function)
-  vec3 V_P = normalize(u_Eye - P);
-  vec3 L_P = normalize(vec3(-5.f) - P);
-  vec3 H_P = (V_P + L_P) / 2.f;
+  //lights     
+    vec4 lights[3];
+    vec3 lightColor[3];
+    lights[0] = vec4(16.0, 13.0, 15.0, 3.0); // key light
+    lights[1] = vec4(-16.0, 13.0, 15.0, 2.0); // fill light
+	lights[2] = vec4(0.0, 50.0, 0.0, 1.0); // back light
+    //lights[3] = vec4(0.0, -15.0, 0.0, 10.0);
+    
+    
+    lightColor[0] =vec3(0.4706, 0.3255, 0.7412); 
+    lightColor[1] = vec3(0.4, 0.7, 1.0);
+    lightColor[2] = vec3(0.6941, 0.8824, 0.9922);
+    //lightColor[3] = vec3(1.0);
 
 
+     //phong (called normal function)
+    vec3 V_P = normalize(look - P);
+    vec3 L_P = normalize(vec3(-5.f) - P);
+    vec3 H_P = (V_P + L_P) / 2.f;
+
+    vec3 color = vec3(0.0);
 
 
-  float spec = abs(pow(dot(H_P, normalize(normal(isect))), 1.f));
+    float spec = abs(pow(dot(H_P, normalize(normal(isect))), 2.f));
+    //float lambert = dot(normalize(-normal(isect)), vec3(-1.f));
 
-  float lambert = dot(normalize(-normal(isect)), vec3(-1.f));
+    vec3 sum = vec3(0.f);
+
+
+   
 
 //SDF
-  vec3 color;
   if(t < 100.f)
   {
     //tag = 1.f;
     int tag_int = int(tag);
     switch(tag_int)
     {
-      case 0: color = vec3(0.9137, 0.7176, 0.3569);break;
-      case 1: color = vec3(0.7686, 0.8745, 0.9608);break;
-      case 3: 
-        float height = perlin_noise((vec2(isect.x + isect.y, isect.z + isect.y) ) / 4.f);
-        //float height_forest = perlin_noise((vec2(fs_Pos.x, fs_Pos.z) ) / 3.f);
-        float worley_Offset = worleyFBM(isect * 0.05);
+    case 0:
+    vec3 color1 = vec3(0.102, 0.6431, 0.8941);
+    vec3 color2 = vec3(0.0, 0.0, 0.0);
+           float fog_noise = smoothstep(0.3, 0.6, warpFBMPerlin(vec3(isect.x + fs_Pos.x, fs_Pos.y * 40., isect.y + fs_Pos.z), int(u_Time * 2.0))) * pow((1. - fs_Pos.y), 2.);
+       color = mix(color1, color2, fog_noise);
 
-        float fs_Height = height * 6.f;
+    //color = mix(color1, color2, abs(sin(-isect.y * 0.1 + u_Time * 0.1)));
 
-        vec3 color1 = vec3(0.4392, 0.7686, 0.9882) ;
-        vec3 color2 = vec3(0.7725, 0.8235, 0.8784) ;
-        color = mix(color2, color1, worley_Offset);
+    //color = color1;
+    break;
+
+      case 1: 
+        color += vec3(0.9725, 0.9804, 0.9804);
         break;
-      case 2: color = vec3(0.698, 0.5412, 0.9529);break;
-      case 4: color = vec3(0.1451, 0.1137, 0.0118);break;
-    //   case 7: vec3 color1 = vec3(0.3529, 0.2157, 0.0275);
-    //           float height = mix(0.f, 1.f, isect.y);
-    //           //float perlin = cnoise(vec3(height+ isect.y) * 0.3);
-    //           float perlin = pnoise(vec3(isect), vec3(2.f));
-    //           vec3 color2 = vec3(0.9059, 0.7216, 0.3765);
-    //           color = mix(color2, color1, perlin);break;
-    //   case 8: vec3 color3 = vec3(0.3529, 0.2157, 0.0275);
-    //           float height1 = mix(0.f, 1.f, isect.z);
-    //           float perlin1 = cnoise(vec3(height+ isect.z) * 0.3);
-    //           vec3 color4 = vec3(0.9059, 0.7216, 0.3765);
-    //           color = mix(color2, color1, perlin1);break;
+      case 3: 
+        vec2 p = 0.01* vec2(isect.x + isect.y, isect.y + isect.z);
+        color += doMagic1(vec2(p));
+        break;
     }
 
-    //color = vec3(tag / 4.0);
-     //color = vec3(0.8667, 0.5882, 0.0667);
-     //color = pow( color, vec3(0.4545) );
-     out_Col = vec4(color * (spec), 1.f);
+
+    vec3 nor = normalize(normal(isect));
+
+        for (int i = 0; i < 3; i++) 
+        { // Compute lambert for each light
+            vec3 lambert = color * min(max(dot(nor, normalize(lights[i].xyz - isect)), 0.0f), 1.0f) * lights[i].w * lightColor[i];
+
+            //vec4 sph1 = vec4(0.0, 10.0, 0.0, 15.0);
+            sum += lambert * sphSoftShadow( isect, normalize(lights[i].xyz - isect), vec4(0.0,0.,0., 10.f), 16.0 );     
+        }  
+
+        if(tag_int != 0)
+            color += sum / 3.0;  
+
+
+    float ambient = 0.4;
+
+    if(tag_int == 0)
+    {
+
+        out_Col = vec4(color, 1.0);        
+    }
+    else
+    {
+
+        if(tag_int == 1)
+        {
+            out_Col = vec4(color * spec, 1.0);            
+        }
+        else
+        {
+            out_Col = vec4(color *  ambient, 1.f);            
+        }
+    }
   }
   else
   {
-    //   if(fs_Pos.y < 0.05)
-    //   {
-    //     float height = perlin_noise((vec2(dir.x, dir.y) ) / 4.f);
-    //     float height_forest = perlin_noise((vec2(fs_Pos.x, fs_Pos.z) ) / 3.f);
-    //     float worley_Offset = worleyFBM(dir * 0.5 + u_Eye);
+     vec2 p = (-u_Dimensions.xy+200.0*vec2(fs_Pos))/u_Dimensions.y;
 
-    //     float fs_Height = height * 6.f;
-
-    //     vec3 color1 = vec3(0.7333, 0.8627, 0.9451) ;
-    //     vec3 color2 = vec3(0.0196, 0.1922, 0.302) ;
-    //     vec3 color = mix(color2, color1, worley_Offset * 2.0);
-    //     //float terrain_y = smoothstep(tree_Height, fs_Height_Forest, fs_Pos.y);
-
-    //     out_Col = vec4(vec3(color), 1.f);
-      //}
-
-        
+    vec2 uv = isect.xy / u_Dimensions.xy;
+    vec3 color = doMagic(p);
+    out_Col = vec4(color * 1.1, 1.0 );
+    draw_stars(out_Col, uv);
+    
   }
 
 
